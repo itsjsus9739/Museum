@@ -8,6 +8,17 @@ window.CONTENIDO = {
 
   museo: { titulo: "Museo de Nosotros", sub: "Para ti ♥" },
 
+  /* CUENTA Y GUARDADO EN LA NUBE (Firebase)
+     La apiKey de Firebase es pública por diseño: la seguridad la dan las reglas de Firestore. */
+  nube: {
+    apiKey: "AIzaSyCCxDsAX1jJPg3CuAekVFFb9U5ue30utKw",
+    authDomain: "museum-3fa4c.firebaseapp.com",
+    projectId: "museum-3fa4c",
+    storageBucket: "museum-3fa4c.firebasestorage.app",
+    messagingSenderId: "1052601583920",
+    appId: "1:1052601583920:web:df9c2fcf12ff03055b20f5"
+  },
+
   /* MÚSICA PRINCIPAL (suena de fondo y se repite en bucle) */
   musicaPrincipal: {
     titulo: "Tema Principal (Nuestro Museo)",
@@ -25,7 +36,7 @@ window.CONTENIDO = {
 
   /* PASILLO: fotos que cuelgan por defecto en los 3 cuadros.
      Ella puede cambiarlas desde el álbum o desde el propio cuadro
-     (su elección se guarda en su navegador). */
+     (su elección se guarda en su cuenta y en su navegador). */
   favoritas: [
     { src: "fotos/fav1.jpg", titulo: "Primera foto juntos", texto: "Escribe aquí por qué esta es especial." },
     { src: "fotos/fav2.jpg", titulo: "Ese viaje",           texto: "Un recuerdo que no se me olvida." },
