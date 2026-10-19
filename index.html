@@ -111,12 +111,17 @@ iframe{width:100%;aspect-ratio:16/9;border:2px solid #785c34;margin-top:6px}
 #qi h3{margin:0 0 6px;font:800 15px "Cinzel",serif;color:#f5d78e}
 #qi .st{display:flex;gap:6px;align-items:center;margin:3px 0}
 .bar{height:8px;background:#2a2236;border:1px solid #57442b;margin:8px 0}.bar i{display:block;height:100%;background:linear-gradient(90deg,#b83b5e,#f5d78e)}
+.fm label{display:block;font-size:8px;margin-bottom:12px;color:#f5d78e}
+.fm input{display:block;width:100%;margin-top:6px;background:#0b0912;border:2px solid #57442b;color:#efe6d5;font:16px system-ui,sans-serif;padding:8px}
+.fm input:focus{border-color:#f5d78e;outline:none}
+#er{color:#ff8fa3}
 </style>
 </head>
 <body>
 <div class="top-bar">
   <h1 id="ti"></h1>
   <div class="hud-btns">
+    <button class="hud-btn" id="btn-acc" title="Cuenta y guardado">👤 Cuenta</button>
     <button class="hud-btn" id="btn-bgm" title="Música (tecla M)">🔇 Música</button>
     <button class="hud-btn" id="btn-fit" title="Cambiar look (tecla C)">👗 Look 3</button>
   </div>
@@ -126,6 +131,9 @@ iframe{width:100%;aspect-ratio:16/9;border:2px solid #785c34;margin-top:6px}
 <div id="pad"><button data-k="arrowup">▲</button><button data-k="arrowleft">◀</button><button data-k="arrowright">▶</button><button data-k="arrowdown">▼</button></div>
 <button id="a">A</button>
 <div id="m"><div class="p"><header><span id="t"></span><button onclick="cerrar()">X</button></header><div id="bd"></div></div></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="contenido.js"></script>
 <script src="arte.js"></script>
 <script>
@@ -143,6 +151,8 @@ function cerrar(){$('#m').classList.remove('on');modal=0;$('#bd').innerHTML=''}
 const au=new Audio();
 let cur=-1,bgmStarted=0,bgmMuted=0,usingSynth=0,actx=null,synthTimer=null,synthStep=0,masterVol=(C.musicaPrincipal&&C.musicaPrincipal.volumen!=null)?C.musicaPrincipal.volumen:0.5;
 au.volume=masterVol;
+let bgmMissing=0,bgmPending=0;
+if(C.musicaPrincipal&&C.musicaPrincipal.archivo){au.preload='auto';au.loop=true;au.src=C.musicaPrincipal.archivo}
 const MELODY=[523.25,659.25,783.99,1046.50,783.99,659.25,493.88,659.25,783.99,987.77,783.99,659.25,440.00,523.25,659.25,880.00,659.25,523.25,392.00,493.88,587.33,783.99,587.33,493.88,349.23,440.00,523.25,698.46,523.25,440.00,329.63,392.00,523.25,659.25,523.25,392.00,293.66,349.23,440.00,587.33,440.00,349.23,392.00,493.88,587.33,783.99,880.00,987.77];
 function playSynthNote(freq,dur){
   if(!actx||bgmMuted||!usingSynth)return;
@@ -176,17 +186,23 @@ function updateNp(){
 function playBgm(){
   cur=-1;stopSynthBgm();
   const mp=C.musicaPrincipal;
-  if(mp&&mp.archivo){
-    au.loop=true;au.src=mp.archivo;au.volume=masterVol;
-    if(!bgmMuted)au.play().then(()=>{bgmStarted=1;updateNp()}).catch(()=>{if(!bgmMuted)startSynthBgm()});
+  if(mp&&mp.archivo&&!bgmMissing){
+    if(bgmPending||bgmMuted)return;
+    au.loop=true;if(au.getAttribute('src')!==mp.archivo)au.src=mp.archivo;au.volume=masterVol;
+    bgmPending=1;
+    au.play().then(()=>{bgmPending=0;bgmStarted=1;updateNp()}).catch(e=>{
+      bgmPending=0;
+      if(e&&e.name==='NotAllowedError'){bgmStarted=0;return}   // el navegador aún no lo permite: se reintenta en el próximo toque
+      bgmMissing=1;if(!bgmMuted)startSynthBgm();
+    });
   }else if(!bgmMuted)startSynthBgm();
 }
-au.onerror=()=>{if(cur==-1&&!bgmMuted)startSynthBgm()};
+au.onerror=()=>{if(cur==-1){bgmMissing=1;if(bgmStarted&&!bgmMuted)startSynthBgm()}};
 function unlockAudio(){
   if(!bgmStarted&&!bgmMuted)playBgm();
   else if(actx&&actx.state==='suspended'&&!bgmMuted)actx.resume();
 }
-['pointerdown','keydown','touchstart'].forEach(ev=>addEventListener(ev,unlockAudio));
+['pointerup','touchend','click','keydown'].forEach(ev=>addEventListener(ev,unlockAudio,true));
 function toggleBgm(){
   if(isMusicPlaying()){bgmMuted=1;au.pause();stopSynthBgm();updateNp()}
   else{
@@ -214,14 +230,14 @@ const LS='museo_favs';let favSel=[null,null,null];
 try{const v=JSON.parse(localStorage.getItem(LS));if(Array.isArray(v)&&v.length==3)favSel=v}catch(e){}
 const saveFav=()=>{try{localStorage.setItem(LS,JSON.stringify(favSel))}catch(e){}};
 function favData(i){const f=C.fotos[favSel[i]];return f?{src:f.src,titulo:f.titulo,texto:f.texto||f.fecha||''}:C.favoritas[i]}
-function ponerFav(j,i){if(favSel[j]===i)favSel[j]=null;else{favSel=favSel.map(v=>v===i?null:v);favSel[j]=i}saveFav()}
+function ponerFav(j,i){if(favSel[j]===i)favSel[j]=null;else{favSel=favSel.map(v=>v===i?null:v);favSel[j]=i}saveFav();guardar()}
 const IMC={};const getImg=s=>IMC[s]||(IMC[s]=Object.assign(new Image(),{src:s}));
 function album(keep){
   const sc=keep?$('#bd').scrollTop:0;
   abrir('Álbum de fotos','<p class="hint">Toca una foto para verla grande. Con los botones 1 · 2 · 3 eliges en qué cuadro del pasillo se cuelga (se guarda en este navegador).</p><div class="g">'+C.fotos.map((f,i)=>`<figure data-i="${i}">${im(f.src)}<figcaption>${esc(f.titulo)}<em>${esc(f.fecha)}</em></figcaption><div class="pk"><span>Cuadro</span>${[0,1,2].map(j=>`<button data-s="${j}" class="${favSel[j]===i?'on':''}">${j+1}</button>`).join('')}</div></figure>`).join('')+'</div><button class="hud-btn" id="rs">Restablecer cuadros</button>',()=>{
     document.querySelectorAll('figure').forEach(f=>f.onclick=e=>{if(!e.target.closest('.pk'))f.classList.toggle('big')});
     document.querySelectorAll('.pk button').forEach(b=>b.onclick=e=>{e.stopPropagation();ponerFav(+b.dataset.s,+b.closest('figure').dataset.i);album(1)});
-    $('#rs').onclick=()=>{favSel=[null,null,null];saveFav();album(1)};
+    $('#rs').onclick=()=>{favSel=[null,null,null];saveFav();guardar();album(1)};
     $('#bd').scrollTop=sc});
 }
 function fav(i){const f=favData(i);
@@ -229,8 +245,8 @@ function fav(i){const f=favData(i);
 }
 function elegir(i){
   abrir('Elige la foto del cuadro '+(i+1),'<div class="g">'+C.fotos.map((f,k)=>`<figure data-k="${k}">${im(f.src)}<figcaption>${esc(f.titulo)}</figcaption></figure>`).join('')+'</div><button class="hud-btn" id="or">Usar la foto original</button>',()=>{
-    document.querySelectorAll('figure').forEach(f=>f.onclick=()=>{favSel=favSel.map(v=>v===+f.dataset.k?null:v);favSel[i]=+f.dataset.k;saveFav();fav(i)});
-    $('#or').onclick=()=>{favSel[i]=null;saveFav();fav(i)}});
+    document.querySelectorAll('figure').forEach(f=>f.onclick=()=>{favSel=favSel.map(v=>v===+f.dataset.k?null:v);favSel[i]=+f.dataset.k;saveFav();guardar();fav(i)});
+    $('#or').onclick=()=>{favSel[i]=null;saveFav();guardar();fav(i)}});
 }
 
 /* ================= CARTAS (manuscritos) ================= */
@@ -251,7 +267,7 @@ function musica(){
   abrir('Selector de música',bgmBtn+C.musica.map((m,i)=>`<button class="tr ${i==cur?'on':''}" data-i="${i}"><span>${esc(m.titulo)}<small>${esc(m.artista)}</small></span><span>${i==cur&&isMusicPlaying()?'♪':'▶'}</span></button>`).join('')+(yt?`<iframe src="https://www.youtube-nocookie.com/embed/${esc(C.musica[cur].yt)}?autoplay=1" allow="autoplay;encrypted-media" allowfullscreen></iframe>`:'')+'<input class="vol" type="range" min="0" max="1" step=".05" value="'+masterVol+'">',()=>{
     $('#tr-bgm').onclick=()=>{if(cur==-1)toggleBgm();else play(-1);musica()};
     document.querySelectorAll('.tr[data-i]').forEach(b=>b.onclick=()=>{const i=+b.dataset.i;if(i==cur&&C.musica[i].archivo){toggleBgm();musica()}else play(i)});
-    $('.vol').oninput=e=>{masterVol=+e.target.value;au.volume=masterVol}});
+    $('.vol').oninput=e=>{masterVol=+e.target.value;au.volume=masterVol;guardar()}});
 }
 
 /* ================= LOGROS (mapa estilo Minecraft) ================= */
@@ -303,7 +319,7 @@ let room=0,trans=null,toast=null;
 let px=11.5*T,py=8*T,fr=0,dir=3,mv=0,outfit=2;
 const FITN=['👗 Look 1','👗 Look 2','🧥 Look 3'];
 $('#btn-fit').textContent=FITN[outfit];
-function toggleOutfit(){outfit=(outfit+1)%3;$('#btn-fit').textContent=FITN[outfit]}
+function toggleOutfit(){outfit=(outfit+1)%3;$('#btn-fit').textContent=FITN[outfit];guardar()}
 $('#btn-fit').onclick=toggleOutfit;
 const key={};
 addEventListener('keydown',e=>{
@@ -316,7 +332,7 @@ addEventListener('keydown',e=>{
   if(!modal&&(k.startsWith('arrow')||k==' '))e.preventDefault();
 });
 addEventListener('keyup',e=>key[e.key.toLowerCase()]=0);
-document.querySelectorAll('[data-k]').forEach(b=>{const k=b.dataset.k;b.onpointerdown=e=>{e.preventDefault();unlockAudio();key[k]=1};['pointerup','pointerleave','pointercancel'].forEach(v=>b['on'+v]=()=>key[k]=0)});
+document.querySelectorAll('[data-k]').forEach(b=>{const k=b.dataset.k;b.onpointerdown=e=>{e.preventDefault();key[k]=1};['pointerup','pointerleave','pointercancel'].forEach(v=>b['on'+v]=()=>key[k]=0)});
 $('#a').onclick=()=>{unlockAudio();if(!modal)act()};
 function near(){
   let b=null,bd=34;
@@ -335,7 +351,7 @@ function hit(nx,ny,isNpc){
 function go(r,sx,sy){trans={t:0,r,sx,sy}}
 function step(){
   mv=0;
-  if(trans){trans.t++;if(trans.t==10){room=trans.r;px=trans.sx;py=trans.sy;toast={t:140,txt:RM[room].name}}if(trans.t>=20)trans=null;return}
+  if(trans){trans.t++;if(trans.t==10){room=trans.r;px=trans.sx;py=trans.sy;toast={t:140,txt:RM[room].name};guardar()}if(trans.t>=20)trans=null;return}
   if(toast&&--toast.t<=0)toast=null;
   if(modal)return;
   const dx=(key.arrowright||key.d?1:0)-(key.arrowleft||key.a?1:0),dy=(key.arrowdown||key.s?1:0)-(key.arrowup||key.w?1:0);
@@ -389,7 +405,7 @@ function draw(){
   q.sort((a,b)=>a[0]-b[0]).forEach(o=>o[1]());
   x.drawImage(ART.light[room],0,0);
   const pg=x.createRadialGradient(px+6,py+2,2,px+6,py+2,42);pg.addColorStop(0,'rgba(255,215,145,.18)');pg.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=pg;x.fillRect(px-38,py-40,88,88);
-  PTS.forEach(p=>{p.y-=p.s;p.x+=Math.sin(fr*.02+p.p)*.15;if(p.y<0){p.y=H*T;p.x=Math.random()*W*T}x.fillStyle=p.c;x.globalAlpha=Math.max(0,.35+Math.sin(fr*.05+p.p)*.35);x.fillRect(p.x|0,p.y|0,1,1)});
+  PTS.forEach(p=>{x.fillStyle=p.c;x.globalAlpha=Math.max(0,.35+Math.sin(fr*.05+p.p)*.35);x.fillRect(p.x|0,p.y|0,1,1)});
   x.globalAlpha=1;
   const t=near();
   if(t&&!modal){
@@ -400,7 +416,76 @@ function draw(){
   if(toast){const w=toast.txt.length*6+20,a=Math.min(1,toast.t/20),bx0=(W*T-w)/2|0;x.globalAlpha=a;R('#c8a35f',bx0-1,7,w+2,16);R('#16111f',bx0,8,w,14);x.fillStyle='#f5d78e';x.font='6px "Press Start 2P",monospace';x.textBaseline='top';x.fillText(toast.txt,bx0+10,12);x.globalAlpha=1}
   if(trans){x.fillStyle='rgba(5,3,10,'+(trans.t<10?trans.t/10:(20-trans.t)/10)+')';x.fillRect(0,0,W*T,H*T)}
 }
-(function loop(){fr++;step();draw();requestAnimationFrame(loop)})();
+/* ================= CUENTA Y GUARDADO EN LA NUBE (Firebase) ================= */
+var fb=null,usr=null,syncMsg='',saveT=null,lastSaved='';
+const NUBE=C.nube||{};
+const ERR={'auth/invalid-credential':'Nombre o contraseña incorrectos.','auth/invalid-login-credentials':'Nombre o contraseña incorrectos.','auth/wrong-password':'Nombre o contraseña incorrectos.','auth/user-not-found':'No existe una cuenta con ese nombre.','auth/email-already-in-use':'Ese nombre ya está en uso.','auth/weak-password':'La contraseña debe tener al menos 6 caracteres.','auth/too-many-requests':'Demasiados intentos. Espera un momento.','auth/network-request-failed':'Sin conexión a internet.','auth/operation-not-allowed':'Falta activar el acceso con correo/contraseña en Firebase.','auth/unauthorized-domain':'Este dominio no está autorizado en Firebase.','permission-denied':'Firebase rechazó el guardado: revisa las reglas de Firestore.'};
+const errTxt=e=>ERR[e&&e.code]||('Error: '+((e&&e.code)||e));
+const mailDe=n=>n.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9._-]/g,'');
+const nombreDe=u=>(u&&u.email||'').split('@')[0];
+const hora=()=>new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'});
+function estado(){return{favs:favSel,outfit,vol:masterVol,room,px:Math.round(px),py:Math.round(py)}}
+function aplicar(e){
+  if(!e)return;
+  if(Array.isArray(e.favs)&&e.favs.length==3){favSel=e.favs;try{localStorage.setItem(LS,JSON.stringify(favSel))}catch(_){}}
+  if(e.outfit>=0&&e.outfit<3){outfit=e.outfit;$('#btn-fit').textContent=FITN[outfit]}
+  if(typeof e.vol=='number'){masterVol=e.vol;au.volume=masterVol}
+  if((e.room===0||e.room===1)&&typeof e.px=='number'){const r0=room;room=e.room;if(!hit(e.px,e.py,0)){px=e.px;py=e.py}else room=r0}
+}
+function subir(){
+  if(!fb||!usr)return Promise.resolve();
+  const st=estado(),js=JSON.stringify(st);if(js===lastSaved)return Promise.resolve();
+  return fb.firestore().collection('partidas').doc(usr.uid).set(Object.assign(st,{nombre:nombreDe(usr),actualizado:Date.now()}))
+    .then(()=>{lastSaved=js;syncMsg='Guardado ✓ '+hora();refCuenta()}).catch(e=>{syncMsg=errTxt(e);refCuenta()});
+}
+function guardar(){if(!usr)return;clearTimeout(saveT);saveT=setTimeout(subir,1500)}
+function updAcc(){$('#btn-acc').textContent='👤 '+(usr?nombreDe(usr):'Cuenta')}
+function refCuenta(){const el=document.getElementById('sm');if(el)el.textContent=syncMsg}
+function cuenta(){
+  if(!fb){abrir('Cuenta','<p class="hint">El guardado en la nube todavía no está configurado. Completa el bloque «nube» en contenido.js siguiendo las instrucciones que hay ahí.</p>');return}
+  if(usr){
+    abrir('Cuenta',`<div class="dlg-box">Conectado como <b>${esc(nombreDe(usr))}</b><br><small id="sm">${esc(syncMsg)}</small></div><p class="hint" style="margin-top:12px">Tu partida se guarda sola: cuadros elegidos, look, volumen, sala y posición.</p><div class="btnrow"><button class="hud-btn" id="sv">Guardar ahora</button><button class="hud-btn" id="lo">Cerrar sesión</button></div>`,()=>{
+      $('#sv').onclick=()=>{lastSaved='';syncMsg='Guardando…';refCuenta();subir()};
+      $('#lo').onclick=()=>{subir().finally(()=>fb.auth().signOut());cerrar()}});
+    return}
+  abrir('Cuenta','<p class="hint">Entra con tu nombre y contraseña para guardar tu partida y continuarla en cualquier dispositivo.</p><div class="fm"><label>Nombre<input id="un" autocomplete="username" maxlength="30" autocapitalize="none"></label><label>Contraseña<input id="pw" type="password" autocomplete="current-password"></label></div><div class="btnrow"><button class="hud-btn" id="li">Entrar</button><button class="hud-btn" id="su">Crear cuenta</button></div><p class="hint" id="er"></p>',()=>{
+    const go=async nueva=>{
+      const n=mailDe($('#un').value),pw=$('#pw').value;
+      if(!n){$('#er').textContent='Escribe un nombre (letras o números).';return}
+      if(pw.length<6){$('#er').textContent='La contraseña debe tener al menos 6 caracteres.';return}
+      $('#er').textContent=nueva?'Creando cuenta…':'Entrando…';
+      try{const a=fb.auth(),m=n+'@museo-cuenta.app';if(nueva)await a.createUserWithEmailAndPassword(m,pw);else await a.signInWithEmailAndPassword(m,pw);cerrar()}
+      catch(e){$('#er').textContent=errTxt(e)}};
+    $('#li').onclick=()=>go(0);$('#su').onclick=()=>go(1);
+    $('#pw').onkeydown=e=>{if(e.key=='Enter')go(0)};
+    setTimeout(()=>$('#un').focus(),50)});
+}
+$('#btn-acc').onclick=cuenta;
+if(window.firebase&&NUBE.apiKey){
+  try{
+    firebase.initializeApp(NUBE);fb=firebase;
+    fb.auth().onAuthStateChanged(async u=>{
+      usr=u;lastSaved='';updAcc();
+      if(!u)return;
+      try{const d=await fb.firestore().collection('partidas').doc(u.uid).get();
+        if(d.exists){aplicar(d.data());lastSaved=JSON.stringify(estado());syncMsg='Partida cargada ✓ '+hora()}
+        else{await subir();syncMsg='Partida nueva creada ✓'}}
+      catch(e){syncMsg=errTxt(e)}
+      refCuenta();
+    });
+  }catch(e){fb=null;console.warn('Firebase no se pudo iniciar',e)}
+}
+setInterval(()=>{if(usr)subir()},30000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')subir()});
+
+const STEP=1000/60;let last=performance.now(),acc=0;
+function tick(){fr++;step();PTS.forEach(p=>{p.y-=p.s;p.x+=Math.sin(fr*.02+p.p)*.15;if(p.y<0){p.y=H*T;p.x=Math.random()*W*T}})}
+(function loop(now){
+  requestAnimationFrame(loop);
+  now=now||performance.now();acc+=Math.min(now-last,250);last=now;
+  let n=0;while(acc>=STEP&&n<5){tick();acc-=STEP;n++}
+  if(n)draw();
+})();
 </script>
 </body>
 </html>
